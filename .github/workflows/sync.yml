@@ -37,8 +37,10 @@ jobs:
 
       - name: Log in to registry
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ github.token }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ github.token }}" | skopeo login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: sync
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./sync.sh
