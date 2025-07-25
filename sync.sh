@@ -4,7 +4,7 @@ set -e
 
 git tag > local.list
 echo "Fetching available releases from GitLab..."
-tags=$(glab release list -R gitlab-org/gitlab-runner | tail -n +3 | awk '{ print $1 }' | grep -vf local.list)
+tags=$(glab release list -R gitlab-org/gitlab-runner | tail -n +3 | awk '{ print $1 }' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | grep -vf local.list)
 
 echo "Available tags to process:"
 echo "$tags"
@@ -41,7 +41,8 @@ do
                 tag_has_images=true
                 
                 echo "    Copying $source_image..."
-                skopeo copy --override-arch $arch_target --dest-creds=":$GITHUB_TOKEN" \
+                # Skopeo verwendet die gespeicherten Login-Credentials
+                skopeo copy --override-arch $arch_target \
                     docker://$source_image \
                     docker://ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$arch_target-$tag
             else
@@ -54,12 +55,15 @@ do
             
             platforms=""
             for arch in $available_archs; do
+                arch_clean=$(echo $arch | xargs)
                 if [ -n "$platforms" ]; then
-                    platforms="$platforms,linux/$arch"
+                    platforms="$platforms,linux/$arch_clean"
                 else
-                    platforms="linux/$arch"
+                    platforms="linux/$arch_clean"
                 fi
             done
+            
+            echo "  Manifest platforms: $platforms"
             
             manifest-tool push from-args \
                 --platforms $platforms \
@@ -72,8 +76,8 @@ do
     
     if [ "$tag_has_images" = true ]; then
         echo "Creating release $tag..."
-        gh release create $tag --generate-notes --notes "Synchronized GitLab Runner Helper images for version $tag"
-        git tag $tag
+        gh release create $tag --generate-notes --notes "Synchronized GitLab Runner Helper images for version $tag" || echo "Release $tag already exists"
+        git tag $tag || echo "Tag $tag already exists"
         echo "✓ Successfully processed tag $tag"
     else
         echo "✗ No images found for tag $tag, skipping release creation"
