@@ -13,14 +13,47 @@ echo ""
 archs="x86_64 arm64 arm s390x ppc64le"
 flavors="alpine3.21 alpine-latest ubuntu"
 
+test_registry_access() {
+    local test_image="registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:alpine3.21-arm64-v18.0.4"
+    echo "Testing registry access with known image: $test_image"
+    
+    echo "1. Using skopeo inspect:"
+    if skopeo inspect docker://$test_image 2>&1; then
+        echo "✓ Skopeo can access the image"
+    else
+        echo "✗ Skopeo cannot access the image"
+    fi
+    
+    echo ""
+    echo "2. Using skopeo list-tags (first 5 tags):"
+    skopeo list-tags docker://registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper 2>&1 | head -20
+    
+    echo ""
+    echo "3. Testing with curl:"
+    curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" https://registry.gitlab.com/v2/gitlab-org/gitlab-runner/gitlab-runner-helper/tags/list
+}
+
+test_registry_access
+echo ""
+echo "Starting sync process..."
+echo ""
+
 for tag in $tags
 do
+    if [ "$tag" != "v18.0.4" ]; then
+        continue
+    fi
+    
     echo "Processing tag $tag..."
     
     tag_has_images=false
     
     for flavor in $flavors
     do
+        if [ "$flavor" != "alpine3.21" ]; then
+            continue
+        fi
+        
         echo "  Checking flavor $flavor..."
         flavor_has_images=false
         available_archs=""
@@ -36,7 +69,9 @@ do
             source_image="registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:$flavor-$arch-$tag"
             dest_image="ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$arch_target-$tag"
             
-            if skopeo inspect docker://$source_image > /dev/null 2>&1; then
+            echo "    Checking $arch: $source_image"
+            
+            if skopeo inspect --retry-times 3 docker://$source_image > /dev/null 2>&1; then
                 echo "    ✓ Found image for $arch"
                 available_archs="$available_archs $arch_target"
                 manifest_images="$manifest_images $dest_image"
@@ -56,6 +91,8 @@ do
                 fi
             else
                 echo "    ✗ Image not found for $arch: $source_image"
+                echo "    Debug info:"
+                skopeo inspect docker://$source_image 2>&1 | head -5
             fi
         done
         
@@ -64,53 +101,4 @@ do
             echo "  Available architectures: $available_archs"
             echo "  Images for manifest: $manifest_images"
             
-            echo "  Waiting 5 seconds for images to be fully available..."
-            sleep 5
-            
-            platforms=""
-            for arch in $available_archs; do
-                arch_clean=$(echo $arch | xargs)
-                if [ -n "$platforms" ]; then
-                    platforms="$platforms,linux/$arch_clean"
-                else
-                    platforms="linux/$arch_clean"
-                fi
-            done
-            
-            echo "  Manifest platforms: $platforms"
-            
-            echo "  Running manifest-tool with:"
-            echo "    --platforms $platforms"
-            echo "    --template ghcr.io/morzan1001/gitlab-runner-helper:$flavor-ARCH-$tag"
-            echo "    --target ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag"
-            
-            manifest-tool push from-args \
-                --platforms $platforms \
-                --template ghcr.io/morzan1001/gitlab-runner-helper:$flavor-ARCH-$tag \
-                --target ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag \
-                --ignore-missing || echo "  ⚠️  manifest-tool reported warnings"
-                
-            echo "  Verifying manifest..."
-            if skopeo inspect docker://ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag > /dev/null 2>&1; then
-                echo "  ✓ Manifest created successfully"
-            else
-                echo "  ⚠️  Could not verify manifest"
-            fi
-        else
-            echo "  ✗ No images found for flavor $flavor, skipping manifest creation"
-        fi
-    done
-    
-    if [ "$tag_has_images" = true ]; then
-        echo "Creating release $tag..."
-        gh release create $tag --generate-notes --notes "Synchronized GitLab Runner Helper images for version $tag" || echo "Release $tag already exists"
-        git tag $tag || echo "Tag $tag already exists"
-        echo "✓ Successfully processed tag $tag"
-    else
-        echo "✗ No images found for tag $tag, skipping release creation"
-    fi
-    
-    echo ""
-done
-
-echo "Sync completed."
+            echo "  Waiting 5 seconds for images to be
