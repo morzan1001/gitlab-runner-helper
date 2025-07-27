@@ -101,4 +101,48 @@ do
             echo "  Available architectures: $available_archs"
             echo "  Images for manifest: $manifest_images"
             
-            echo "  Waiting 5 seconds for images to be
+            echo "  Waiting 5 seconds for images to be fully available..."
+            sleep 5
+            
+            platforms=""
+            for arch in $available_archs; do
+                arch_clean=$(echo $arch | xargs)
+                if [ -n "$platforms" ]; then
+                    platforms="$platforms,linux/$arch_clean"
+                else
+                    platforms="linux/$arch_clean"
+                fi
+            done
+            
+            echo "  Manifest platforms: $platforms"
+            
+            manifest-tool push from-args \
+                --platforms $platforms \
+                --template ghcr.io/morzan1001/gitlab-runner-helper:$flavor-ARCH-$tag \
+                --target ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag \
+                --ignore-missing || echo "  ⚠️  manifest-tool reported warnings"
+                
+            echo "  Verifying manifest..."
+            if skopeo inspect docker://ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag > /dev/null 2>&1; then
+                echo "  ✓ Manifest created successfully"
+            else
+                echo "  ⚠️  Could not verify manifest"
+            fi
+        else
+            echo "  ✗ No images found for flavor $flavor, skipping manifest creation"
+        fi
+    done
+    
+    if [ "$tag_has_images" = true ]; then
+        echo "Creating release $tag..."
+        gh release create $tag --generate-notes --notes "Synchronized GitLab Runner Helper images for version $tag" || echo "Release $tag already exists"
+        git tag $tag || echo "Tag $tag already exists"
+        echo "✓ Successfully processed tag $tag"
+    else
+        echo "✗ No images found for tag $tag, skipping release creation"
+    fi
+    
+    echo ""
+done
+
+echo "Sync completed."
