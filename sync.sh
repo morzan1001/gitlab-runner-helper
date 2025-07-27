@@ -54,8 +54,10 @@ do
                         docker://$source_image \
                         docker://$dest_image
                     
-                    if skopeo inspect docker://$dest_image > /dev/null 2>&1; then
-                        echo "    ✓ Successfully copied"
+                    if skopeo inspect --raw docker://$dest_image 2>/dev/null | jq -e '.manifests' > /dev/null 2>&1; then
+                        echo "    ✓ Successfully copied (multi-arch manifest)"
+                    elif skopeo inspect --raw docker://$dest_image 2>/dev/null | jq -e '.config' > /dev/null 2>&1; then
+                        echo "    ✓ Successfully copied (single image)"
                     else
                         echo "    ⚠️  Warning: Could not verify copied image"
                     fi
@@ -74,7 +76,7 @@ do
                         docker://$source_image \
                         docker://$dest_image
                         
-                    if skopeo inspect docker://$dest_image > /dev/null 2>&1; then
+                    if skopeo inspect --raw docker://$dest_image > /dev/null 2>&1; then
                         echo "    ✓ Successfully copied"
                     else
                         echo "    ⚠️  Warning: Could not verify copied image"
@@ -104,6 +106,11 @@ do
             
             echo "  Manifest platforms: $platforms"
             
+            echo "  Images for manifest:"
+            for arch in $available_archs; do
+                echo "    - ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$arch-$tag"
+            done
+            
             manifest-tool push from-args \
                 --platforms $platforms \
                 --template ghcr.io/morzan1001/gitlab-runner-helper:$flavor-ARCH-$tag \
@@ -111,8 +118,9 @@ do
                 --ignore-missing || echo "  ⚠️  manifest-tool reported warnings"
                 
             echo "  Verifying manifest..."
-            if skopeo inspect docker://ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag > /dev/null 2>&1; then
-                echo "  ✓ Manifest created successfully"
+            if skopeo inspect --raw docker://ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag 2>/dev/null | jq -e '.manifests' > /dev/null 2>&1; then
+                manifest_archs=$(skopeo inspect --raw docker://ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag 2>/dev/null | jq -r '.manifests[].platform.architecture' | tr '\n' ' ')
+                echo "  ✓ Manifest created successfully with architectures: $manifest_archs"
             else
                 echo "  ⚠️  Could not verify manifest"
             fi
