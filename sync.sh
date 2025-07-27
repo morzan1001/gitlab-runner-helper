@@ -25,34 +25,33 @@ do
         flavor_has_images=false
         available_archs=""
         
-        multi_arch_image="registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:$flavor-$tag"
-        
-        echo "  Checking for multi-arch manifest: $multi_arch_image"
-        if skopeo inspect --raw docker://$multi_arch_image 2>/dev/null | jq -e '.manifests' > /dev/null 2>&1; then
-            echo "  ✓ Found multi-arch manifest for $flavor-$tag"
+        for arch in $archs
+        do
+            arch_target=$arch
+            if [ $arch_target = "x86_64" ]; then
+                arch_target="amd64"
+            fi
             
-            manifest_data=$(skopeo inspect --raw docker://$multi_arch_image 2>/dev/null)
+            source_image="registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:$flavor-$arch-$tag"
+            dest_image="ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$arch_target-$tag"
             
-            for arch in $archs
-            do
-                arch_target=$arch
-                if [ $arch_target = "x86_64" ]; then
-                    arch_target="amd64"
-                fi
+            echo "    Checking $arch: $source_image"
+            
+            if skopeo inspect --raw docker://$source_image 2>/dev/null | jq -e '.manifests' > /dev/null 2>&1; then
+                echo "    ✓ Found multi-arch manifest for $arch"
                 
-                if echo "$manifest_data" | jq -e ".manifests[] | select(.platform.architecture == \"$arch_target\")" > /dev/null 2>&1; then
-                    echo "    ✓ Found architecture: $arch_target"
+                manifest_arch=$(skopeo inspect --raw docker://$source_image 2>/dev/null | jq -r '.manifests[0].platform.architecture')
+                
+                if [ "$manifest_arch" = "$arch_target" ] || ([ "$arch" = "x86_64" ] && [ "$manifest_arch" = "amd64" ]); then
                     available_archs="$available_archs $arch_target"
                     flavor_has_images=true
                     tag_has_images=true
                     
-                    dest_image="ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$arch_target-$tag"
-                    
-                    echo "    Copying $multi_arch_image for $arch_target..."
+                    echo "    Copying $source_image (contains $manifest_arch)..."
                     echo "    To: $dest_image"
                     
-                    skopeo copy --override-arch $arch_target --override-os linux \
-                        docker://$multi_arch_image \
+                    skopeo copy --all \
+                        docker://$source_image \
                         docker://$dest_image
                     
                     if skopeo inspect docker://$dest_image > /dev/null 2>&1; then
@@ -61,24 +60,11 @@ do
                         echo "    ⚠️  Warning: Could not verify copied image"
                     fi
                 else
-                    echo "    ✗ Architecture $arch_target not found in manifest"
+                    echo "    ⚠️  Architecture mismatch: expected $arch_target, found $manifest_arch"
                 fi
-            done
-        else
-            echo "  No multi-arch manifest found, trying individual images..."
-            
-            for arch in $archs
-            do
-                arch_target=$arch
-                if [ $arch_target = "x86_64" ]; then
-                    arch_target="amd64"
-                fi
-                
-                source_image="registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:$flavor-$arch-$tag"
-                dest_image="ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$arch_target-$tag"
-                
+            else
                 if skopeo inspect docker://$source_image > /dev/null 2>&1; then
-                    echo "    ✓ Found image for $arch"
+                    echo "    ✓ Found single-arch image for $arch"
                     available_archs="$available_archs $arch_target"
                     flavor_has_images=true
                     tag_has_images=true
@@ -96,8 +82,8 @@ do
                 else
                     echo "    ✗ Image not found for $arch: $source_image"
                 fi
-            done
-        fi
+            fi
+        done
         
         if [ "$flavor_has_images" = true ]; then
             echo "  Creating manifest for $flavor-$tag"
