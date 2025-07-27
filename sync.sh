@@ -24,6 +24,7 @@ do
         echo "  Checking flavor $flavor..."
         flavor_has_images=false
         available_archs=""
+        manifest_images=""
         
         for arch in $archs
         do
@@ -33,25 +34,38 @@ do
             fi
             
             source_image="registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:$flavor-$arch-$tag"
+            dest_image="ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$arch_target-$tag"
             
             if skopeo inspect docker://$source_image > /dev/null 2>&1; then
                 echo "    ✓ Found image for $arch"
                 available_archs="$available_archs $arch_target"
+                manifest_images="$manifest_images $dest_image"
                 flavor_has_images=true
                 tag_has_images=true
                 
                 echo "    Copying $source_image..."
-                # Skopeo verwendet die gespeicherten Login-Credentials
+                echo "    To: $dest_image"
                 skopeo copy --override-arch $arch_target \
                     docker://$source_image \
-                    docker://ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$arch_target-$tag
+                    docker://$dest_image
+                    
+                if skopeo inspect docker://$dest_image > /dev/null 2>&1; then
+                    echo "    ✓ Successfully copied"
+                else
+                    echo "    ⚠️  Warning: Could not verify copied image"
+                fi
             else
                 echo "    ✗ Image not found for $arch: $source_image"
             fi
         done
         
         if [ "$flavor_has_images" = true ]; then
-            echo "  Creating manifest for $flavor-$tag with archs:$available_archs"
+            echo "  Creating manifest for $flavor-$tag"
+            echo "  Available architectures: $available_archs"
+            echo "  Images for manifest: $manifest_images"
+            
+            echo "  Waiting 5 seconds for images to be fully available..."
+            sleep 5
             
             platforms=""
             for arch in $available_archs; do
@@ -65,10 +79,23 @@ do
             
             echo "  Manifest platforms: $platforms"
             
+            echo "  Running manifest-tool with:"
+            echo "    --platforms $platforms"
+            echo "    --template ghcr.io/morzan1001/gitlab-runner-helper:$flavor-ARCH-$tag"
+            echo "    --target ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag"
+            
             manifest-tool push from-args \
                 --platforms $platforms \
                 --template ghcr.io/morzan1001/gitlab-runner-helper:$flavor-ARCH-$tag \
-                --target ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag
+                --target ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag \
+                --ignore-missing || echo "  ⚠️  manifest-tool reported warnings"
+                
+            echo "  Verifying manifest..."
+            if skopeo inspect docker://ghcr.io/morzan1001/gitlab-runner-helper:$flavor-$tag > /dev/null 2>&1; then
+                echo "  ✓ Manifest created successfully"
+            else
+                echo "  ⚠️  Could not verify manifest"
+            fi
         else
             echo "  ✗ No images found for flavor $flavor, skipping manifest creation"
         fi
