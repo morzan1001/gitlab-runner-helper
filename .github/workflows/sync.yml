@@ -31,9 +31,22 @@ jobs:
 
       - name: Install manifest-tools
         run: go install github.com/estesp/manifest-tool/v2/cmd/manifest-tool@latest
-
+      
+      # Upstream Go build fails due to a replace entry in gitlab.com/gitlab-org/cli,
+      # so we use the officially built release tarball.
+      #- name: Install glab
+      #  run: go install gitlab.com/gitlab-org/cli/cmd/glab@latest
       - name: Install glab
-        run: go install gitlab.com/gitlab-org/cli/cmd/glab@latest
+        run: |
+          set -euo pipefail
+          GLAB_TAG=$(curl -s https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases | jq -r '.[0].tag_name')
+          GLAB_VERSION=${GLAB_TAG#v}
+          GLAB_ARCHIVE="glab_${GLAB_VERSION}_Linux_x86_64.tar.gz"
+          curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/${GLAB_TAG}/downloads/${GLAB_ARCHIVE}" -o "${GLAB_ARCHIVE}"
+          tar -xzf "${GLAB_ARCHIVE}"
+          sudo mv "glab_${GLAB_VERSION}_Linux_x86_64/bin/glab" /usr/local/bin/glab
+          sudo chmod +x /usr/local/bin/glab
+          rm -rf "glab_${GLAB_VERSION}_Linux_x86_64" "${GLAB_ARCHIVE}"   
 
       - name: Log in to registry
         run: |
