@@ -37,16 +37,13 @@ jobs:
       #- name: Install glab
       #  run: go install gitlab.com/gitlab-org/cli/cmd/glab@latest
       - name: Install glab
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
-          set -euo pipefail
-          GLAB_TAG=$(curl -s https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/releases | jq -r '.[0].tag_name')
-          GLAB_VERSION=${GLAB_TAG#v}
-          GLAB_ARCHIVE="glab_${GLAB_VERSION}_Linux_x86_64.tar.gz"
-          curl -sL "https://gitlab.com/gitlab-org/cli/-/releases/${GLAB_TAG}/downloads/${GLAB_ARCHIVE}" -o "${GLAB_ARCHIVE}"
-          tar -xzf "${GLAB_ARCHIVE}"
-          sudo mv "glab_${GLAB_VERSION}_Linux_x86_64/bin/glab" /usr/local/bin/glab
-          sudo chmod +x /usr/local/bin/glab
-          rm -rf "glab_${GLAB_VERSION}_Linux_x86_64" "${GLAB_ARCHIVE}"   
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl apt-transport-https ca-certificates gnupg
+          curl -sSf https://packages.gitlab.com/install/repositories/cli/cli/script.deb.sh | sudo bash
+          sudo apt-get install -y glab
 
       - name: Log in to registry
         run: |
